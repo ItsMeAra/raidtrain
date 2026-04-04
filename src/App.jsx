@@ -311,10 +311,10 @@ export default function App() {
               {booked ? (
                 <div className="border-b border-border-subtle py-3 flex flex-col gap-2.5 sm:flex-row sm:items-center sm:gap-3">
                   <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-                    <span className="font-mono text-base text-muted-2 w-8 text-right shrink-0">
+                    <span className="font-mono text-base text-muted-2 text-right shrink-0">
                       #{String(slot.position).padStart(2, '0')}
                     </span>
-                    <span className="font-mono text-base text-muted-2 w-[6.5rem] sm:w-28 shrink-0 tabular-nums">
+                    <span className="font-mono text-base text-muted-2 shrink-0 tabular-nums">
                       {slot.start} {' '}
                       <span className="font-mono text-xs font-normal text-muted-2 normal-case tracking-widest">
                         ET
@@ -345,7 +345,7 @@ export default function App() {
                     <span className="font-mono text-base text-muted-2 w-8 text-right shrink-0">
                       #{String(slot.position).padStart(2, '0')}
                     </span>
-                    <span className="font-mono text-base text-muted w-[6.5rem] sm:w-28 shrink-0 tabular-nums">
+                    <span className="font-mono text-base text-muted shrink-0 tabular-nums">
                       {slot.start} {' '}
                       <span className="font-mono text-xs font-normal text-muted-2 normal-case tracking-widest">
                         ET
