@@ -315,7 +315,10 @@ export default function App() {
                       #{String(slot.position).padStart(2, '0')}
                     </span>
                     <span className="font-mono text-base text-muted-2 w-[6.5rem] sm:w-28 shrink-0 tabular-nums">
-                      {slot.start}
+                      {slot.start} {' '}
+                      <span className="font-mono text-xs font-normal text-muted-2 normal-case tracking-widest">
+                        ET
+                      </span>
                     </span>
                     <span
                       className="text-neutral-700 shrink-0 text-lg hidden sm:inline"
@@ -343,7 +346,10 @@ export default function App() {
                       #{String(slot.position).padStart(2, '0')}
                     </span>
                     <span className="font-mono text-base text-muted w-[6.5rem] sm:w-28 shrink-0 tabular-nums">
-                      {slot.start}
+                      {slot.start} {' '}
+                      <span className="font-mono text-xs font-normal text-muted-2 normal-case tracking-widest">
+                        ET
+                      </span>
                     </span>
                   </div>
                   <button
