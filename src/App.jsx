@@ -1,473 +1,649 @@
-import { useState, useEffect } from "react";
-import { supabase } from "./supabase.js";
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { supabase } from './supabase.js'
+
+function formatHour(hour24) {
+  const h = ((hour24 % 24) + 24) % 24
+  const period = h >= 12 ? 'PM' : 'AM'
+  const h12 = h % 12 === 0 ? 12 : h % 12
+  return `${h12}:00 ${period}`
+}
 
 const SLOTS = Array.from({ length: 15 }, (_, i) => {
-  const hour = 9 + i;
-  const fmt = (h) => {
-    const ampm = h >= 12 ? "PM" : "AM";
-    const h12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
-    return `${h12}:00 ${ampm}`;
-  };
-  return { hour, start: fmt(hour), end: fmt(hour + 1), position: i + 1 };
-});
+  const hour = 9 + i
+  return {
+    hour,
+    start: formatHour(hour),
+    end: formatHour(hour + 1),
+    position: i + 1,
+  }
+})
 
-const HOST_OPEN  = { id: "host-open",  start: "8:50 AM",  end: "9:00 AM",  label: "OPENS THE RAID TRAIN", isHost: true };
-const HOST_CLOSE = { id: "host-close", start: "12:00 AM", end: "12:10 AM", label: "CLOSES THE RAID TRAIN", isHost: true };
+const HOST_OPEN = {
+  id: 'host-open',
+  start: '8:50 AM',
+  end: '9:00 AM',
+  label: 'OPENS THE RAID TRAIN',
+}
 
-const ADMIN_PW = import.meta.env.VITE_ADMIN_PASSWORD || "raidtrain";
+const HOST_CLOSE = {
+  id: 'host-close',
+  start: '12:00 AM',
+  end: '12:10 AM',
+  label: 'CLOSES THE RAID TRAIN',
+}
+
+const TOTAL_SLOTS = 15
+const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD ?? ''
+
+function formatEventDate(isoDate) {
+  if (!isoDate) return null
+  const d = new Date(`${isoDate}T12:00:00`)
+  if (Number.isNaN(d.getTime())) return isoDate
+  return d.toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  })
+}
 
 export default function App() {
-  const [date, setDate] = useState("");
-  const [slots, setSlots] = useState({});
-  const [loading, setLoading] = useState(true);
-  const [modal, setModal] = useState(null);
-  const [form, setForm] = useState({ name: "" });
-  const [confirmation, setConfirmation] = useState(null);
-  const [adminOpen, setAdminOpen] = useState(false);
-  const [adminPwInput, setAdminPwInput] = useState("");
-  const [adminAuthed, setAdminAuthed] = useState(false);
-  const [adminDateInput, setAdminDateInput] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(null);
+  const [eventDateRaw, setEventDateRaw] = useState(null)
+  const [bookings, setBookings] = useState({})
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null)
 
-  // ── Font injection ──────────────────────────────────────────────────────────
+  const [modalHour, setModalHour] = useState(null)
+  const [modalStep, setModalStep] = useState('form')
+  const [showNameInput, setShowNameInput] = useState('')
+  const [savingSlot, setSavingSlot] = useState(false)
+  const [confirmedName, setConfirmedName] = useState('')
+
+  const [adminOpen, setAdminOpen] = useState(false)
+  const [adminAuthed, setAdminAuthed] = useState(false)
+  const [adminPasswordInput, setAdminPasswordInput] = useState('')
+  const [adminDateInput, setAdminDateInput] = useState('')
+  const [savingDate, setSavingDate] = useState(false)
+
+  const hasClient = Boolean(
+    import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY,
+  )
+
+  const refreshData = useCallback(async () => {
+    const [configRes, slotsRes] = await Promise.all([
+      supabase.from('raid_config').select('event_date').eq('id', 'singleton').maybeSingle(),
+      supabase.from('raid_slots').select('hour, show_name'),
+    ])
+    if (configRes.error) throw configRes.error
+    if (slotsRes.error) throw slotsRes.error
+    setEventDateRaw(configRes.data?.event_date ?? null)
+    const next = {}
+    for (const row of slotsRes.data ?? []) {
+      next[row.hour] = row.show_name
+    }
+    setBookings(next)
+  }, [])
+
   useEffect(() => {
-    const style = document.createElement("style");
-    style.textContent = `
-      @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
-      * { box-sizing: border-box; margin: 0; padding: 0; }
-      body { background: #0a0a0a; }
-      @keyframes pulseGlow {
-        0%, 100% { box-shadow: 0 0 0 0 rgba(255,69,0,0.4); }
-        50% { box-shadow: 0 0 12px 4px rgba(255,69,0,0.15); }
-      }
-      @keyframes slideUp {
-        from { opacity: 0; transform: translateY(16px); }
-        to { opacity: 1; transform: translateY(0); }
-      }
-      @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-      @keyframes sheetUp {
-        from { transform: translateY(100%); opacity: 0; }
-        to { transform: translateY(0); opacity: 1; }
-      }
-      .slot-row { animation: slideUp 0.35s ease both; }
-      .claim-btn {
-        animation: pulseGlow 2.5s ease-in-out infinite;
-        transition: all 0.15s ease !important;
-      }
-      .claim-btn:hover {
-        background: #FF4500 !important;
-        color: white !important;
-        transform: translateX(4px);
-      }
-      .modal-overlay { animation: fadeIn 0.2s ease; }
-      .modal-card { animation: slideUp 0.25s ease; }
-      .sheet-card { animation: sheetUp 0.3s cubic-bezier(0.32,0.72,0,1); }
-      input, button { font-family: inherit; }
-      input:focus { outline: none; border-color: #FF4500 !important; box-shadow: 0 0 0 2px rgba(255,69,0,0.15); }
-      ::-webkit-scrollbar { width: 4px; }
-      ::-webkit-scrollbar-track { background: #111; }
-      ::-webkit-scrollbar-thumb { background: #444; }
-      .remove-btn:hover { border-color: #FF4500 !important; color: #FF4500 !important; }
-    `;
-    document.head.appendChild(style);
-    return () => document.head.removeChild(style);
-  }, []);
+    if (!hasClient) {
+      setLoadError('Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY.')
+      setLoading(false)
+      return
+    }
 
-  // ── Load data from Supabase ─────────────────────────────────────────────────
+    let cancelled = false
+    ;(async () => {
+      try {
+        setLoadError(null)
+        await refreshData()
+      } catch (e) {
+        if (!cancelled) {
+          setLoadError(e?.message ?? 'Could not connect to Supabase.')
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [hasClient, refreshData])
+
   useEffect(() => {
-    loadData();
+    if (!hasClient || loadError) return
 
-    // Real-time subscription so all open tabs/browsers stay in sync
     const channel = supabase
-      .channel("raid-changes")
-      .on("postgres_changes", { event: "*", schema: "public", table: "raid_slots" }, loadSlots)
-      .on("postgres_changes", { event: "*", schema: "public", table: "raid_config" }, loadConfig)
-      .subscribe();
+      .channel('raidtrain-public')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'raid_slots' },
+        () => {
+          void refreshData().catch(() => {})
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'raid_config' },
+        () => {
+          void refreshData().catch(() => {})
+        },
+      )
+      .subscribe()
 
-    return () => supabase.removeChannel(channel);
-  }, []);
-
-  const loadConfig = async () => {
-    const { data } = await supabase
-      .from("raid_config")
-      .select("event_date")
-      .eq("id", "singleton")
-      .single();
-    if (data?.event_date) setDate(data.event_date);
-  };
-
-  const loadSlots = async () => {
-    const { data } = await supabase.from("raid_slots").select("*");
-    if (data) {
-      const map = {};
-      data.forEach(row => { map[row.hour] = { name: row.show_name }; });
-      setSlots(map);
+    return () => {
+      void supabase.removeChannel(channel)
     }
-  };
+  }, [hasClient, loadError, refreshData])
 
-  const loadData = async () => {
-    setLoading(true);
-    try {
-      await Promise.all([loadConfig(), loadSlots()]);
-    } catch (e) {
-      setError("Could not connect to database. Check your Supabase credentials.");
-    }
-    setLoading(false);
-  };
+  const bookedCount = useMemo(
+    () => SLOTS.filter((s) => bookings[s.hour]).length,
+    [bookings],
+  )
+  const openCount = TOTAL_SLOTS - bookedCount
 
-  // ── Claim a slot ────────────────────────────────────────────────────────────
-  const claimSlot = async () => {
-    if (!form.name.trim() || !modal || saving) return;
-    setSaving(true);
-    const { error } = await supabase
-      .from("raid_slots")
-      .insert({ hour: modal.hour, show_name: form.name.trim() });
+  const eventDateLine = eventDateRaw
+    ? formatEventDate(eventDateRaw)
+    : null
 
+  function openClaimModal(hour) {
+    setModalHour(hour)
+    setModalStep('form')
+    setShowNameInput('')
+    setConfirmedName('')
+  }
+
+  function closeModal() {
+    setModalHour(null)
+    setModalStep('form')
+    setShowNameInput('')
+    setConfirmedName('')
+    setSavingSlot(false)
+  }
+
+  async function submitClaim() {
+    const name = showNameInput.trim()
+    if (!name || modalHour == null) return
+    setSavingSlot(true)
+    const { error } = await supabase.from('raid_slots').insert({
+      hour: modalHour,
+      show_name: name,
+    })
+    setSavingSlot(false)
     if (error) {
-      if (error.code === "23505") {
-        alert("That slot was just taken! Please pick another.");
-        await loadSlots();
-      } else {
-        alert("Error saving. Please try again.");
+      if (error.code === '23505') {
+        alert('That slot was just taken. Refreshing the schedule.')
+        await refreshData().catch(() => {})
+        closeModal()
+        return
       }
-    } else {
-      setSlots(p => ({ ...p, [modal.hour]: { name: form.name.trim() } }));
-      setConfirmation({ slot: modal, name: form.name.trim() });
-      setModal(null);
-      setForm({ name: "" });
+      alert(error.message ?? 'Could not save. Try again.')
+      return
     }
-    setSaving(false);
-  };
+    setConfirmedName(name)
+    setModalStep('confirm')
+    await refreshData().catch(() => {})
+  }
 
-  // ── Admin actions ───────────────────────────────────────────────────────────
-  const adminLogin = () => {
-    if (adminPwInput === ADMIN_PW) { setAdminAuthed(true); setAdminPwInput(""); }
-    else alert("Wrong password.");
-  };
+  function tryAdminLogin(e) {
+    e.preventDefault()
+    if (adminPasswordInput === ADMIN_PASSWORD) {
+      setAdminAuthed(true)
+      setAdminPasswordInput('')
+      setAdminDateInput(eventDateRaw ?? '')
+    } else {
+      alert('Wrong password.')
+    }
+  }
 
-  const saveDate = async () => {
-    if (!adminDateInput) return;
-    const d = new Date(adminDateInput + "T12:00:00");
-    const formatted = d.toLocaleDateString("en-US", {
-      weekday: "long", month: "long", day: "numeric", year: "numeric"
-    });
-    await supabase
-      .from("raid_config")
-      .upsert({ id: "singleton", event_date: formatted });
-    setDate(formatted);
-  };
+  async function saveEventDate(e) {
+    e.preventDefault()
+    setSavingDate(true)
+    const { error } = await supabase.from('raid_config').upsert(
+      { id: 'singleton', event_date: adminDateInput || null },
+      { onConflict: 'id' },
+    )
+    setSavingDate(false)
+    if (error) {
+      alert(error.message ?? 'Could not save date.')
+      return
+    }
+    await refreshData().catch(() => {})
+  }
 
-  const removeSlot = async (hour) => {
-    if (!window.confirm("Remove this booking?")) return;
-    await supabase.from("raid_slots").delete().eq("hour", hour);
-    setSlots(p => { const n = { ...p }; delete n[hour]; return n; });
-  };
+  async function removeSlot(hour) {
+    if (!window.confirm('Remove this booking from the roster?')) return
+    const { error } = await supabase.from('raid_slots').delete().eq('hour', hour)
+    if (error) {
+      alert(error.message ?? 'Could not remove.')
+      return
+    }
+    await refreshData().catch(() => {})
+  }
 
-  const filledCount = Object.keys(slots).length;
+  function closeAdmin() {
+    setAdminOpen(false)
+    setAdminAuthed(false)
+    setAdminPasswordInput('')
+    setAdminDateInput('')
+  }
 
-  // ── Styles ──────────────────────────────────────────────────────────────────
-  const S = {
-    app: { minHeight: "100vh", background: "#0a0a0a", color: "white", fontFamily: "'Oswald', sans-serif", paddingBottom: "80px" },
-    header: { borderBottom: "1px solid #1f1f1f", padding: "36px 24px 28px", textAlign: "center", position: "relative" },
-    eyebrow: { fontFamily: "'Space Mono', monospace", fontSize: "10px", letterSpacing: "4px", color: "#FF4500", marginBottom: "10px", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" },
-    dot: { width: "6px", height: "6px", borderRadius: "50%", background: "#FF4500", display: "inline-block", animation: "pulseGlow 2s infinite" },
-    h1: { fontSize: "clamp(36px, 7vw, 72px)", fontWeight: 700, letterSpacing: "-1px", lineHeight: 1, textTransform: "uppercase" },
-    dateLine: { marginTop: "12px", fontFamily: "'Space Mono', monospace", fontSize: "12px", letterSpacing: "1px" },
-    stats: { display: "flex", justifyContent: "center", marginTop: "24px", border: "1px solid #1a1a1a", maxWidth: "280px", margin: "24px auto 0" },
-    statItem: { flex: 1, padding: "12px 8px", textAlign: "center" },
-    statNum: (color) => ({ fontSize: "26px", fontWeight: 700, color: color || "white", fontFamily: "'Space Mono', monospace" }),
-    statLabel: { fontSize: "9px", fontFamily: "'Space Mono', monospace", color: "#7a7a7a", letterSpacing: "2px", marginTop: "2px" },
-    grid: { maxWidth: "680px", margin: "0 auto", padding: "8px 16px 0" },
-    slotRow: (i) => ({ display: "flex", alignItems: "center", borderBottom: "1px solid #141414", padding: "12px 0", gap: "12px", animationDelay: `${i * 0.03}s` }),
-    posNum: { fontFamily: "'Space Mono', monospace", fontSize: "14px", color: "#7a7a7a", width: "28px", flexShrink: 0, textAlign: "right" },
-    timeLabel: (booked) => ({ fontFamily: "'Space Mono', monospace", fontSize: "16px", color: booked ? "#7a7a7a" : "#909090", width: "95px", flexShrink: 0 }),
-    arrow: (booked) => ({ color: booked ? "#3a3a3a" : "#444", fontSize: "14px", flexShrink: 0 }),
-    showName: { flex: 1, fontSize: "18px", fontWeight: 600, color: "#FF4500", textTransform: "uppercase", letterSpacing: "0.5px" },
-    badge: { background: "#FF4500", color: "white", fontSize: "9px", fontFamily: "'Space Mono', monospace", padding: "3px 8px", letterSpacing: "2px", flexShrink: 0 },
-    claimBtn: { background: "transparent", border: "1px solid #FF4500", color: "#FF4500", padding: "8px 18px", fontSize: "12px", fontFamily: "'Oswald', sans-serif", letterSpacing: "2px", cursor: "pointer", textTransform: "uppercase", fontWeight: 600 },
-    overlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.88)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: "20px" },
-    modalCard: { background: "#111", border: "1px solid #FF4500", padding: "32px", width: "100%", maxWidth: "400px" },
-    fieldLabel: { display: "block", fontSize: "10px", fontFamily: "'Space Mono', monospace", color: "#909090", letterSpacing: "2px", marginBottom: "8px" },
-    input: { width: "100%", background: "#0a0a0a", border: "1px solid #444", color: "white", padding: "12px 14px", fontSize: "17px", fontFamily: "'Oswald', sans-serif", letterSpacing: "0.5px", transition: "border-color 0.15s, box-shadow 0.15s" },
-    primaryBtn: (active) => ({ flex: 1, background: active ? "#FF4500" : "#1c1c1c", border: "none", color: active ? "white" : "#666", padding: "14px", fontSize: "16px", fontFamily: "'Oswald', sans-serif", letterSpacing: "2px", cursor: active ? "pointer" : "not-allowed", fontWeight: 600, textTransform: "uppercase", transition: "background 0.2s" }),
-    cancelBtn: { background: "transparent", border: "1px solid #444", color: "#909090", padding: "14px 18px", fontSize: "14px", fontFamily: "'Oswald', sans-serif", letterSpacing: "1px", cursor: "pointer" },
-    adminBtn: { position: "fixed", bottom: "20px", right: "20px", background: "#111", border: "1px solid #444", color: "#909090", padding: "8px 14px", fontSize: "9px", fontFamily: "'Space Mono', monospace", letterSpacing: "2px", cursor: "pointer", zIndex: 100, transition: "all 0.15s" },
-    sheetOverlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 400 },
-    sheet: { background: "#111", border: "1px solid #1f1f1f", borderBottom: "none", padding: "28px 24px", width: "100%", maxWidth: "640px", maxHeight: "82vh", overflowY: "auto" },
-    rosterRow: (booked) => ({ display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px", background: booked ? "#161616" : "transparent", borderLeft: `3px solid ${booked ? "#FF4500" : "#2a2a2a"}`, marginBottom: "3px" }),
-  };
+  const selectedSlotMeta =
+    modalHour != null ? SLOTS.find((s) => s.hour === modalHour) : null
 
-  if (loading) return (
-    <div style={{ ...S.app, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ fontFamily: "'Space Mono', monospace", fontSize: "11px", letterSpacing: "4px", color: "#FF4500" }}>
-        LOADING SCHEDULE...
+  if (loadError) {
+    return (
+      <div className="app-backdrop text-muted flex min-h-dvh items-center justify-center px-4 py-10">
+        <div className="raid-card relative z-10 w-full max-w-md overflow-hidden px-6 py-10 text-center">
+          <h1 className="font-display text-2xl text-white uppercase tracking-wide mb-3">
+            Connection error
+          </h1>
+          <p className="font-mono text-base text-muted-2">{loadError}</p>
+        </div>
       </div>
-    </div>
-  );
+    )
+  }
 
-  if (error) return (
-    <div style={{ ...S.app, display: "flex", alignItems: "center", justifyContent: "center", padding: "40px" }}>
-      <div style={{ textAlign: "center", maxWidth: "400px" }}>
-        <div style={{ fontSize: "32px", marginBottom: "16px" }}>⚠️</div>
-        <div style={{ fontFamily: "'Space Mono', monospace", fontSize: "12px", color: "#FF4500", letterSpacing: "2px", marginBottom: "12px" }}>CONNECTION ERROR</div>
-        <div style={{ fontFamily: "'Space Mono', monospace", fontSize: "11px", color: "#909090", lineHeight: 1.6 }}>{error}</div>
+  if (loading) {
+    return (
+      <div className="app-backdrop flex min-h-dvh items-center justify-center px-4">
+        <div className="raid-card relative z-10 px-10 py-12">
+          <p className="font-mono text-sm text-muted-2 tracking-widest">LOADING…</p>
+        </div>
       </div>
-    </div>
-  );
+    )
+  }
 
   return (
-    <div style={S.app}>
-      {/* ── HEADER ── */}
-      <div style={S.header}>
-        <div style={S.eyebrow}>
-          <span style={S.dot} />
+    <div className="app-backdrop text-white pb-[max(7.5rem,env(safe-area-inset-bottom,0px))]">
+      <div className="mx-auto w-full max-w-[720px] px-3 pt-6 sm:px-5 sm:pt-8 sm:pb-2">
+        <div className="raid-card relative z-10 overflow-hidden">
+          <header className="border-b border-border-subtle px-3 pt-8 sm:px-6 sm:pt-10 pb-6 sm:pb-8">
+        <p className="font-mono text-xs tracking-[0.25em] text-muted flex items-center justify-center gap-2 mb-3 text-center">
+          <span
+            className="inline-block w-2 h-2 rounded-full bg-orange animate-pulse"
+            aria-hidden
+          />
           WHATNOT RAID TRAIN
-          <span style={S.dot} />
-        </div>
-        <h1 style={S.h1}>RAID SCHEDULE</h1>
-        <div style={S.dateLine}>
-          {date
-            ? <span style={{ color: "#888" }}>{date.toUpperCase()} · ALL TIMES ET</span>
-            : <span style={{ color: "#7a7a7a" }}>DATE TBD — ADMIN SETS THE DATE · ALL TIMES ET</span>
-          }
-        </div>
-        <div style={S.stats}>
-          <div style={{ ...S.statItem, borderRight: "1px solid #1a1a1a" }}>
-            <div style={S.statNum("#FF4500")}>{filledCount}</div>
-            <div style={S.statLabel}>BOOKED</div>
+          <span
+            className="inline-block w-2 h-2 rounded-full bg-orange animate-pulse"
+            aria-hidden
+          />
+        </p>
+        <h1 className="font-display text-4xl sm:text-5xl md:text-6xl font-bold text-center uppercase tracking-tight mb-3 sm:mb-4 px-1 leading-tight">
+          RAID SCHEDULE
+        </h1>
+        <p className="text-muted-2 font-mono text-xs sm:text-sm tracking-wider text-center mb-5 sm:mb-6 px-1 text-balance">
+          {eventDateLine ?? 'DATE TBD — ADMIN SETS THE DATE'}
+        </p>
+        <div className="grid grid-cols-3 font-mono text-[11px] sm:text-xs tracking-widest">
+          <div className="text-center py-3 sm:py-2 border-r border-border-subtle min-h-[3.25rem] sm:min-h-0 flex flex-col justify-center">
+            <span className="text-muted-2 block mb-1">BOOKED</span>
+            <span className="text-orange text-base tabular-nums">{bookedCount}</span>
           </div>
-          <div style={{ ...S.statItem, borderRight: "1px solid #1a1a1a" }}>
-            <div style={S.statNum()}>{15 - filledCount}</div>
-            <div style={S.statLabel}>OPEN</div>
+          <div className="text-center py-3 sm:py-2 border-r border-border-subtle min-h-[3.25rem] sm:min-h-0 flex flex-col justify-center">
+            <span className="text-muted-2 block mb-1">OPEN</span>
+            <span className="text-white text-base tabular-nums">{openCount}</span>
           </div>
-          <div style={S.statItem}>
-            <div style={S.statNum()}>15</div>
-            <div style={S.statLabel}>SLOTS</div>
+          <div className="text-center py-3 sm:py-2 min-h-[3.25rem] sm:min-h-0 flex flex-col justify-center">
+            <span className="text-muted-2 block mb-1">TOTAL</span>
+            <span className="text-white text-base tabular-nums">{TOTAL_SLOTS}</span>
           </div>
         </div>
-        <div style={{ marginTop: "16px", fontFamily: "'Space Mono', monospace", fontSize: "10px", color: "#7a7a7a", letterSpacing: "1px" }}>
-          Each slot = 1 hour · Pick your time · Each show raids the next in line
-        </div>
-      </div>
+          </header>
 
-      {/* ── SCHEDULE GRID ── */}
-      <div style={S.grid}>
-        <HostRow slot={HOST_OPEN} index={-1} />
-
+          <main className="px-3 pb-6 pt-2 sm:px-6 sm:pb-8">
+        <div className="animate-slide-up" style={{ animationDelay: '0ms' }}>
+          <HostRow host={HOST_OPEN} />
+        </div>
         {SLOTS.map((slot, i) => {
-          const booked = slots[slot.hour];
+          const booked = bookings[slot.hour]
+          const staggerIndex = i + 1
           return (
-            <div key={slot.hour} className="slot-row" style={S.slotRow(i)}>
-              <div style={S.posNum}>#{String(slot.position).padStart(2, "0")}</div>
-              <div style={S.timeLabel(booked)}>{slot.start} ET</div>
-              <div style={S.arrow(booked)}>→</div>
-              {booked ? (
-                <>
-                  <div style={S.showName}>{booked.name}</div>
-                  <div style={S.badge}>BOOKED</div>
-                </>
-              ) : (
-                <button className="claim-btn" onClick={() => setModal(slot)} style={S.claimBtn}>
-                  CLAIM SLOT
-                </button>
-              )}
-            </div>
-          );
-        })}
-
-        <HostRow slot={HOST_CLOSE} index={15} />
-      </div>
-
-      {/* ── ADMIN BUTTON ── */}
-      <button onClick={() => setAdminOpen(true)} style={S.adminBtn}>⚙ ADMIN</button>
-
-      {/* ── SIGNUP MODAL ── */}
-      {modal && (
-        <div className="modal-overlay" style={S.overlay} onClick={e => e.target === e.currentTarget && setModal(null)}>
-          <div className="modal-card" style={S.modalCard}>
-            <div style={{ fontFamily: "'Space Mono', monospace", fontSize: "10px", color: "#FF4500", letterSpacing: "3px", marginBottom: "6px" }}>
-              CLAIM YOUR SLOT
-            </div>
-            <h2 style={{ fontSize: "42px", fontWeight: 700, textTransform: "uppercase", lineHeight: 1, marginBottom: "4px" }}>
-              {modal.start}
-            </h2>
-            <div style={{ fontFamily: "'Space Mono', monospace", fontSize: "11px", color: "#909090", marginBottom: "28px" }}>
-              {modal.start} → {modal.end} ET · Slot #{String(modal.position).padStart(2, "0")}
-            </div>
-
-            <div style={{ marginBottom: "24px" }}>
-              <label style={S.fieldLabel}>YOUR WHATNOT USERNAME / SHOW NAME</label>
-              <input
-                type="text"
-                placeholder="@yourwhatnotname"
-                value={form.name}
-                onChange={e => setForm({ name: e.target.value })}
-                onKeyDown={e => e.key === "Enter" && claimSlot()}
-                style={S.input}
-                autoFocus
-              />
-            </div>
-
-            <div style={{ display: "flex", gap: "10px" }}>
-              <button onClick={claimSlot} disabled={!form.name.trim() || saving} style={S.primaryBtn(form.name.trim() && !saving)}>
-                {saving ? "SAVING..." : "LOCK IT IN 🔒"}
-              </button>
-              <button onClick={() => { setModal(null); setForm({ name: "" }); }} style={S.cancelBtn}>
-                CANCEL
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── CONFIRMATION ── */}
-      {confirmation && (
-        <div className="modal-overlay" style={{ ...S.overlay, zIndex: 300 }} onClick={() => setConfirmation(null)}>
-          <div className="modal-card" style={{ ...S.modalCard, textAlign: "center", border: "2px solid #FF4500", padding: "40px 32px" }}>
-            <div style={{ fontSize: "52px", marginBottom: "16px" }}>🔥</div>
-            <div style={{ fontFamily: "'Space Mono', monospace", fontSize: "10px", color: "#FF4500", letterSpacing: "3px", marginBottom: "8px" }}>
-              YOU'RE IN THE RAID TRAIN
-            </div>
-            <h2 style={{ fontSize: "44px", fontWeight: 700, textTransform: "uppercase", lineHeight: 1, marginBottom: "4px" }}>
-              {confirmation.slot.start} ET
-            </h2>
-            <div style={{ fontFamily: "'Space Mono', monospace", fontSize: "11px", color: "#909090", marginBottom: "24px" }}>
-              {confirmation.slot.start} → {confirmation.slot.end} ET · Slot #{String(confirmation.slot.position).padStart(2, "0")}
-              {date && ` · ${date}`}
-            </div>
-            <div style={{ background: "#0a0a0a", border: "1px solid #1f1f1f", padding: "18px", marginBottom: "20px" }}>
-              <div style={{ fontSize: "24px", fontWeight: 700, color: "#FF4500", textTransform: "uppercase" }}>
-                {confirmation.name}
-              </div>
-            </div>
-            <div style={{ fontFamily: "'Space Mono', monospace", fontSize: "10px", color: "#909090", lineHeight: 1.7, marginBottom: "24px" }}>
-              📸 Screenshot this as your confirmation!<br />
-              You'll raid the next show in the lineup.
-            </div>
-            <button
-              onClick={() => setConfirmation(null)}
-              style={{ background: "#FF4500", border: "none", color: "white", padding: "14px 40px", fontSize: "18px", fontFamily: "'Oswald', sans-serif", letterSpacing: "2px", cursor: "pointer", fontWeight: 600, textTransform: "uppercase" }}
+            <div
+              key={slot.hour}
+              className="animate-slide-up"
+              style={{ animationDelay: `${staggerIndex * 30}ms` }}
             >
-              LET'S GOOO 🔥
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ── ADMIN SHEET ── */}
-      {adminOpen && (
-        <div style={S.sheetOverlay} onClick={e => e.target === e.currentTarget && setAdminOpen(false)}>
-          <div className="sheet-card" style={S.sheet}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
-              <div style={{ fontFamily: "'Space Mono', monospace", fontSize: "10px", letterSpacing: "3px", color: "#FF4500" }}>⚙ ADMIN PANEL</div>
-              <button onClick={() => setAdminOpen(false)} style={{ background: "none", border: "none", color: "#909090", cursor: "pointer", fontSize: "22px", lineHeight: 1 }}>×</button>
-            </div>
-
-            {!adminAuthed ? (
-              <div>
-                <div style={{ fontFamily: "'Space Mono', monospace", fontSize: "10px", color: "#909090", letterSpacing: "2px", marginBottom: "10px" }}>PASSWORD</div>
-                <div style={{ display: "flex", gap: "10px" }}>
-                  <input
-                    type="password"
-                    value={adminPwInput}
-                    onChange={e => setAdminPwInput(e.target.value)}
-                    onKeyDown={e => e.key === "Enter" && adminLogin()}
-                    placeholder="Enter admin password"
-                    style={{ ...S.input, flex: 1 }}
-                    autoFocus
-                  />
-                  <button onClick={adminLogin} style={{ background: "#FF4500", border: "none", color: "white", padding: "12px 24px", fontSize: "15px", fontFamily: "'Oswald', sans-serif", letterSpacing: "2px", cursor: "pointer", fontWeight: 600 }}>
-                    ENTER
+              {booked ? (
+                <div className="border-b border-border-subtle py-3 flex flex-col gap-2.5 sm:flex-row sm:items-center sm:gap-3">
+                  <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                    <span className="font-mono text-base text-muted-2 w-8 text-right shrink-0">
+                      #{String(slot.position).padStart(2, '0')}
+                    </span>
+                    <span className="font-mono text-base text-muted-2 w-[6.5rem] sm:w-28 shrink-0 tabular-nums">
+                      {slot.start}
+                    </span>
+                    <span
+                      className="text-neutral-700 shrink-0 text-lg hidden sm:inline"
+                      aria-hidden
+                    >
+                      →
+                    </span>
+                    <span className="bg-orange text-white font-mono text-[10px] px-2.5 py-1 tracking-widest shrink-0 sm:hidden">
+                      BOOKED
+                    </span>
+                  </div>
+                  <div className="flex flex-col gap-2 min-w-0 sm:flex-row sm:items-center sm:flex-1 sm:gap-3">
+                    <span className="font-display text-lg sm:text-xl font-semibold text-orange uppercase tracking-wide break-words sm:flex-1 sm:min-w-0 sm:truncate">
+                      {booked}
+                    </span>
+                    <span className="bg-orange text-white font-mono text-[10px] px-2.5 py-1 tracking-widest shrink-0 self-start hidden sm:inline-block">
+                      BOOKED
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <div className="border-b border-border-subtle py-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-3">
+                  <div className="flex items-center gap-2 sm:gap-3">
+                    <span className="font-mono text-base text-muted-2 w-8 text-right shrink-0">
+                      #{String(slot.position).padStart(2, '0')}
+                    </span>
+                    <span className="font-mono text-base text-muted w-[6.5rem] sm:w-28 shrink-0 tabular-nums">
+                      {slot.start}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => openClaimModal(slot.hour)}
+                    className="w-full min-h-11 sm:min-h-0 sm:w-auto sm:ml-auto shrink-0 border border-orange text-orange font-display font-semibold uppercase text-sm tracking-widest px-5 py-2.5 animate-pulse-glow hover:bg-orange hover:text-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Claim slot
                   </button>
                 </div>
-              </div>
+              )}
+            </div>
+          )
+        })}
+        <div
+          className="animate-slide-up"
+          style={{ animationDelay: `${16 * 30}ms` }}
+        >
+          <HostRow host={HOST_CLOSE} />
+        </div>
+          </main>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => setAdminOpen(true)}
+        className="fixed z-40 bg-surface border border-border text-muted font-mono text-[11px] tracking-widest px-3.5 py-2.5 min-h-11 min-w-[4.5rem] cursor-pointer hover:border-orange hover:text-orange transition-colors right-[max(1rem,env(safe-area-inset-right,0px))] bottom-[max(1rem,env(safe-area-inset-bottom,0px))] sm:right-5 sm:bottom-5"
+      >
+        ⚙ ADMIN
+      </button>
+
+      {modalHour != null && selectedSlotMeta && (
+        <div
+          className="fixed inset-0 z-50 bg-black/88 flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fade-in overflow-y-auto overscroll-contain"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="modal-title"
+        >
+          <div className="bg-surface border border-orange border-b-0 sm:border-b w-full max-w-md shadow-lg p-6 sm:p-8 rounded-t-2xl sm:rounded-none mt-auto sm:mt-0 max-h-[min(92dvh,100%)] overflow-y-auto sm:max-h-none">
+            {modalStep === 'form' ? (
+              <>
+                <h2 id="modal-title" className="sr-only">
+                  Claim raid slot
+                </h2>
+                <p className="font-display text-3xl sm:text-4xl font-bold text-center uppercase mb-2 break-words">
+                  {selectedSlotMeta.start}
+                </p>
+                <p className="font-mono text-[11px] sm:text-xs text-muted-2 text-center tracking-widest mb-6 sm:mb-8 text-balance px-1">
+                  #{String(selectedSlotMeta.position).padStart(2, '0')} ·{' '}
+                  {selectedSlotMeta.start} – {selectedSlotMeta.end}
+                </p>
+                <label
+                  htmlFor="show-name"
+                  className="font-mono text-xs text-muted-2 tracking-widest block mb-2"
+                >
+                  Enter Whatnot Username:
+                </label>
+                <input
+                  id="show-name"
+                  type="text"
+                  autoComplete="off"
+                  placeholder="@whatnotusername"
+                  value={showNameInput}
+                  onChange={(e) => setShowNameInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && showNameInput.trim() && !savingSlot) {
+                      void submitClaim()
+                    }
+                  }}
+                  className="w-full bg-bg border border-border text-white placeholder:text-muted-2 font-display text-xl px-4 py-3.5 mb-6"
+                />
+                <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-stretch">
+                  <button
+                    type="button"
+                    onClick={closeModal}
+                    className="w-full sm:w-auto bg-transparent border border-border text-muted font-display text-base tracking-wide px-4 py-3.5 sm:py-4 min-h-11 cursor-pointer hover:text-white transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!showNameInput.trim() || savingSlot}
+                    onClick={() => void submitClaim()}
+                    className="w-full sm:flex-1 bg-orange text-white font-display font-semibold text-base sm:text-lg uppercase tracking-widest py-3.5 sm:py-4 min-h-11 cursor-pointer transition-colors disabled:bg-surface disabled:text-neutral-600 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {savingSlot ? 'SAVING…' : 'LOCK IT IN 🔒'}
+                  </button>
+                </div>
+              </>
             ) : (
               <>
-                {/* Date setter */}
-                <div style={{ marginBottom: "32px", paddingBottom: "28px", borderBottom: "1px solid #1a1a1a" }}>
-                  <div style={{ fontFamily: "'Space Mono', monospace", fontSize: "10px", color: "#909090", letterSpacing: "2px", marginBottom: "10px" }}>SET EVENT DATE</div>
-                  <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-                    <input type="date" value={adminDateInput} onChange={e => setAdminDateInput(e.target.value)} style={{ ...S.input, flex: 1, colorScheme: "dark" }} />
-                    <button onClick={saveDate} style={{ background: "#FF4500", border: "none", color: "white", padding: "12px 20px", fontSize: "14px", fontFamily: "'Oswald', sans-serif", letterSpacing: "2px", cursor: "pointer", fontWeight: 600 }}>SAVE</button>
-                  </div>
-                  {date && <div style={{ marginTop: "8px", fontFamily: "'Space Mono', monospace", fontSize: "10px", color: "#FF4500" }}>Current: {date}</div>}
-                </div>
-
-                {/* Roster */}
-                <div style={{ fontFamily: "'Space Mono', monospace", fontSize: "10px", color: "#909090", letterSpacing: "2px", marginBottom: "12px" }}>
-                  FULL ROSTER — {filledCount}/{SLOTS.length} SLOTS BOOKED
-                </div>
-                <div>
-                  <AdminHostRow slot={HOST_OPEN} />
-                  {SLOTS.map(slot => {
-                    const booked = slots[slot.hour];
-                    return (
-                      <div key={slot.hour} style={S.rosterRow(booked)}>
-                        <div style={{ fontFamily: "'Space Mono', monospace", fontSize: "10px", color: "#7a7a7a", width: "24px", flexShrink: 0 }}>
-                          #{String(slot.position).padStart(2, "0")}
-                        </div>
-                        <div style={{ fontFamily: "'Space Mono', monospace", fontSize: "10px", color: "#909090", width: "80px", flexShrink: 0 }}>
-                          {slot.start}
-                        </div>
-                        {booked ? (
-                          <>
-                            <div style={{ flex: 1, fontSize: "15px", fontWeight: 600, color: "#FF4500", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-                              {booked.name}
-                            </div>
-                            <button
-                              className="remove-btn"
-                              onClick={() => removeSlot(slot.hour)}
-                              style={{ background: "none", border: "1px solid #444", color: "#909090", padding: "4px 10px", fontSize: "9px", fontFamily: "'Space Mono', monospace", cursor: "pointer", letterSpacing: "1px", flexShrink: 0, transition: "all 0.15s" }}
-                            >
-                              REMOVE
-                            </button>
-                          </>
-                        ) : (
-                          <div style={{ flex: 1, fontFamily: "'Space Mono', monospace", fontSize: "10px", color: "#7a7a7a" }}>— OPEN —</div>
-                        )}
-                      </div>
-                    );
-                  })}
-                  <AdminHostRow slot={HOST_CLOSE} />
-                </div>
+                <p className="text-5xl text-center mb-4" aria-hidden>
+                  🔥
+                </p>
+                <p className="font-display text-2xl sm:text-3xl font-bold text-center uppercase mb-2 break-words px-1">
+                  {selectedSlotMeta.start}
+                </p>
+                <p className="font-display text-xl sm:text-2xl text-center text-orange uppercase tracking-wide mb-6 break-words px-1">
+                  {confirmedName}
+                </p>
+                <p className="text-muted font-mono text-sm text-center mb-8">
+                  Screenshot this confirmation for your records.
+                </p>
+                <button
+                  type="button"
+                  onClick={closeModal}
+                  className="w-full min-h-11 bg-orange text-white font-display font-semibold text-base sm:text-lg uppercase tracking-widest py-3.5 sm:py-4 cursor-pointer"
+                >
+                  LET&apos;S GOOO 🔥
+                </button>
               </>
             )}
           </div>
         </div>
       )}
+
+      {adminOpen && (
+        <div
+          className="fixed inset-0 z-50 flex flex-col justify-end bg-black/70"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Admin panel"
+        >
+          <button
+            type="button"
+            className="flex-1 min-h-0 cursor-default bg-transparent border-0 w-full"
+            aria-label="Close admin overlay"
+            onClick={closeAdmin}
+          />
+          <div className="bg-surface border-t border-border rounded-t-2xl max-h-[min(90dvh,100%)] overflow-y-auto overscroll-contain animate-sheet-up shadow-2xl pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]">
+            <div className="max-w-lg w-full mx-auto p-4 sm:p-6 pb-6 sm:pb-10">
+              <div className="flex justify-between items-start gap-3 mb-5 sm:mb-6">
+                <h2 className="font-display text-xl uppercase tracking-wide">
+                  Admin
+                </h2>
+                <button
+                  type="button"
+                  onClick={closeAdmin}
+                  className="font-mono text-sm text-muted hover:text-white"
+                >
+                  Close
+                </button>
+              </div>
+
+              {!adminAuthed ? (
+                <form onSubmit={tryAdminLogin} className="space-y-4">
+                  <label
+                    htmlFor="admin-pass"
+                    className="font-mono text-xs text-muted-2 tracking-widest block"
+                  >
+                    Password
+                  </label>
+                  <input
+                    id="admin-pass"
+                    type="password"
+                    autoComplete="current-password"
+                    value={adminPasswordInput}
+                    onChange={(e) => setAdminPasswordInput(e.target.value)}
+                    className="w-full bg-bg border border-border text-white font-display text-xl px-4 py-3.5"
+                  />
+                  <button
+                    type="submit"
+                    className="w-full bg-orange text-white font-display font-semibold text-base uppercase tracking-widest py-3.5 cursor-pointer"
+                  >
+                    Unlock
+                  </button>
+                </form>
+              ) : (
+                <>
+                  <section className="mb-8">
+                    <h3 className="font-mono text-xs text-muted-2 tracking-widest mb-3">
+                      Set event date
+                    </h3>
+                    <form
+                      onSubmit={(e) => void saveEventDate(e)}
+                      className="flex flex-col sm:flex-row gap-3"
+                    >
+                      <input
+                        type="date"
+                        value={adminDateInput}
+                        onChange={(e) => setAdminDateInput(e.target.value)}
+                        className="flex-1 bg-bg border border-border text-white font-mono text-base px-3 py-3.5"
+                      />
+                      <button
+                        type="submit"
+                        disabled={savingDate}
+                        className="bg-orange text-white font-display font-semibold text-base uppercase tracking-widest px-6 py-3.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+                      >
+                        {savingDate ? 'SAVING…' : 'SAVE'}
+                      </button>
+                    </form>
+                  </section>
+
+                  <section>
+                    <h3 className="font-mono text-xs text-muted-2 tracking-widest mb-3">
+                      Full roster
+                    </h3>
+                    <div className="space-y-1">
+                      <AdminHostRow
+                        time={`${HOST_OPEN.start} – ${HOST_OPEN.end}`}
+                        name="MrMerchBot"
+                        sublabel={HOST_OPEN.label}
+                      />
+                      {SLOTS.map((slot) => {
+                        const booked = bookings[slot.hour]
+                        return (
+                          <div
+                            key={slot.hour}
+                            className="flex flex-col gap-2.5 px-3 py-3 border-b border-border-subtle sm:flex-row sm:items-center sm:gap-2 sm:py-2"
+                          >
+                            <div className="flex items-baseline gap-2 sm:gap-2 shrink-0 flex-wrap">
+                              <span className="font-mono text-xs text-muted-2 w-9 text-right sm:text-left">
+                                #{String(slot.position).padStart(2, '0')}
+                              </span>
+                              <span className="font-mono text-[11px] sm:text-xs text-muted min-w-0">
+                                {slot.start} – {slot.end}
+                              </span>
+                            </div>
+                            {booked ? (
+                              <div className="flex flex-col gap-2 min-w-0 sm:flex-row sm:items-center sm:flex-1 sm:justify-between sm:gap-2">
+                                <span className="font-display text-sm sm:text-base font-semibold text-orange uppercase tracking-wide break-words sm:min-w-0 sm:truncate">
+                                  {booked}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => void removeSlot(slot.hour)}
+                                  className="font-mono text-[10px] text-orange border border-orange px-3 py-2 min-h-10 tracking-widest w-full sm:w-auto sm:min-h-0 sm:px-2.5 sm:py-1.5 shrink-0 hover:bg-orange hover:text-white transition-colors cursor-pointer"
+                                >
+                                  REMOVE
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="font-mono text-sm text-muted-2 sm:flex-1">
+                                — OPEN —
+                              </span>
+                            )}
+                          </div>
+                        )
+                      })}
+                      <AdminHostRow
+                        time={`${HOST_CLOSE.start} – ${HOST_CLOSE.end}`}
+                        name="MrMerchBot"
+                        sublabel={HOST_CLOSE.label}
+                      />
+                    </div>
+                  </section>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
-  );
+  )
 }
 
-function HostRow({ slot, index }) {
+function HostRow({ host }) {
   return (
-    <div
-      className="slot-row"
-      style={{ display: "flex", alignItems: "center", borderBottom: "1px solid #1a1a1a", padding: "14px 0", gap: "12px", animationDelay: `${index * 0.03}s`, background: "linear-gradient(90deg, rgba(255,193,7,0.04) 0%, transparent 100%)" }}
-    >
-      <div style={{ width: "28px", flexShrink: 0, textAlign: "right", fontSize: "13px" }}>👑</div>
-      <div style={{ fontFamily: "'Space Mono', monospace", fontSize: "12px", color: "#a88c00", width: "95px", flexShrink: 0 }}>{slot.start} ET</div>
-      <div style={{ color: "#4a4000", fontSize: "14px", flexShrink: 0 }}>→</div>
-      <div style={{ flex: 1, display: "flex", alignItems: "center", gap: "12px" }}>
-        <div style={{ fontSize: "18px", fontWeight: 700, color: "#FFC107", textTransform: "uppercase", letterSpacing: "0.5px" }}>MrMerchBot</div>
-        <div style={{ background: "transparent", border: "1px solid #a88c00", color: "#a88c00", fontSize: "9px", fontFamily: "'Space Mono', monospace", padding: "3px 8px", letterSpacing: "2px", flexShrink: 0 }}>{slot.label}</div>
+    <div className="flex flex-col gap-2.5 py-3 border-b border-border-subtle bg-gradient-to-r from-yellow-500/5 to-transparent sm:flex-row sm:items-center sm:gap-3 sm:flex-wrap">
+      <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+        <span className="w-8 text-right shrink-0 text-gold text-lg leading-none" aria-hidden>
+          👑
+        </span>
+        <span className="font-mono text-sm text-gold-muted w-[6.5rem] sm:w-28 shrink-0 tabular-nums">
+          {host.start}
+        </span>
+        <span className="text-yellow-900 shrink-0 text-lg hidden sm:inline" aria-hidden>
+          →
+        </span>
       </div>
-      <div style={{ fontFamily: "'Space Mono', monospace", fontSize: "9px", color: "#a88c00", letterSpacing: "1px", flexShrink: 0 }}>10 MIN</div>
+      <span className="font-display text-lg sm:text-xl font-bold text-gold uppercase tracking-wide min-w-0 break-words sm:flex-1 sm:truncate">
+        MrMerchBot
+      </span>
+      <div className="flex flex-wrap items-center justify-between gap-2 sm:justify-end sm:gap-3 sm:ml-auto sm:max-w-[min(100%,14rem)] md:max-w-[40%]">
+        <span className="border border-gold-muted text-gold-muted font-mono text-[10px] px-2.5 py-1 tracking-widest text-left leading-tight flex-1 min-w-0 sm:flex-none sm:text-right">
+          {host.label}
+        </span>
+        <span className="font-mono text-[10px] text-gold-muted tracking-wide shrink-0">
+          10 min
+        </span>
+      </div>
     </div>
-  );
+  )
 }
 
-function AdminHostRow({ slot }) {
+function AdminHostRow({ time, name, sublabel }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px", marginBottom: "3px", background: "#161400", borderLeft: "3px solid #a88c00" }}>
-      <div style={{ fontSize: "12px", width: "24px", flexShrink: 0 }}>👑</div>
-      <div style={{ fontFamily: "'Space Mono', monospace", fontSize: "10px", color: "#a88c00", width: "80px", flexShrink: 0 }}>{slot.start}</div>
-      <div style={{ flex: 1 }}>
-        <div style={{ fontSize: "14px", fontWeight: 600, color: "#FFC107", textTransform: "uppercase", letterSpacing: "0.5px" }}>MrMerchBot</div>
-        <div style={{ fontFamily: "'Space Mono', monospace", fontSize: "10px", color: "#a88c00" }}>{slot.label} · 10 min</div>
+    <div className="flex flex-col gap-2 px-3 py-3 mb-0.5 bg-gold-bg border-l-4 border-gold-muted sm:flex-row sm:items-start sm:gap-3 sm:flex-wrap">
+      <span className="font-mono text-[11px] sm:text-xs text-gold-muted shrink-0 sm:w-40">
+        {time}
+      </span>
+      <div className="flex-1 min-w-0 sm:min-w-[8rem]">
+        <span className="font-display text-sm sm:text-base font-semibold text-gold uppercase tracking-wide block break-words">
+          {name}
+        </span>
+        <span className="font-mono text-[11px] sm:text-xs text-gold-muted text-balance">
+          {sublabel}
+        </span>
       </div>
-      <div style={{ fontFamily: "'Space Mono', monospace", fontSize: "9px", color: "#a88c00", padding: "3px 8px", border: "1px solid #a88c00", letterSpacing: "1px" }}>HOST</div>
+      <span className="font-mono text-[10px] text-gold-muted px-2.5 py-1 border border-gold-muted tracking-wide shrink-0 self-start">
+        HOST
+      </span>
     </div>
-  );
+  )
 }
