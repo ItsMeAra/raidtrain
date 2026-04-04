@@ -273,8 +273,11 @@ export default function App() {
         <h1 className="font-display text-4xl sm:text-5xl md:text-6xl font-bold text-center uppercase tracking-tight mb-3 sm:mb-4 px-1 leading-tight">
           RAID SCHEDULE
         </h1>
-        <p className="text-muted-2 font-mono text-xs sm:text-sm tracking-wider text-center mb-5 sm:mb-6 px-1 text-balance">
+        <p className="text-muted-2 font-mono text-xs sm:text-sm tracking-wider text-center mb-2 px-1 text-balance">
           {eventDateLine ?? 'DATE TBD — ADMIN SETS THE DATE'}
+        </p>
+        <p className="text-muted font-mono text-[10px] sm:text-[11px] tracking-[0.2em] text-center uppercase mb-5 sm:mb-6 px-1">
+          All slot times are Eastern Time (ET)
         </p>
         <div className="grid grid-cols-3 font-mono text-[11px] sm:text-xs tracking-widest">
           <div className="text-center py-3 sm:py-2 border-r border-border-subtle min-h-[3.25rem] sm:min-h-0 flex flex-col justify-center">
@@ -391,7 +394,7 @@ export default function App() {
                 </p>
                 <p className="font-mono text-[11px] sm:text-xs text-muted-2 text-center tracking-widest mb-6 sm:mb-8 text-balance px-1">
                   #{String(selectedSlotMeta.position).padStart(2, '0')} ·{' '}
-                  {selectedSlotMeta.start} – {selectedSlotMeta.end}
+                  {selectedSlotMeta.start} – {selectedSlotMeta.end} · ET
                 </p>
                 <label
                   htmlFor="show-name"
@@ -436,8 +439,11 @@ export default function App() {
                 <p className="text-5xl text-center mb-4" aria-hidden>
                   🔥
                 </p>
-                <p className="font-display text-2xl sm:text-3xl font-bold text-center uppercase mb-2 break-words px-1">
-                  {selectedSlotMeta.start}
+                <p className="font-display text-2xl sm:text-3xl font-bold text-center uppercase mb-1 break-words px-1">
+                  {selectedSlotMeta.start}{' '}
+                  <span className="font-mono text-xs font-normal text-muted-2 normal-case tracking-widest">
+                    ET
+                  </span>
                 </p>
                 <p className="font-display text-xl sm:text-2xl text-center text-orange uppercase tracking-wide mb-6 break-words px-1">
                   {confirmedName}
