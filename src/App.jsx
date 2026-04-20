@@ -496,7 +496,7 @@ export default function App() {
             </p>
 
             <p className="text-gold font-mono text-sm sm:text-base tracking-wider text-center mb-2">
-              {eventDateLine ? `${eventDateLine} · Noon ET` : 'SET EVENT DATE IN ADMIN'}
+              {eventDateLine ? `${eventDateLine} · 12 PM ET` : 'SET EVENT DATE IN ADMIN'}
             </p>
 
             {countdown?.done ? (
