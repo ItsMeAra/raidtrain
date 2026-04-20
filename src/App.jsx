@@ -8,8 +8,9 @@ function formatHour(hour24) {
   return `${h12}:00 ${period}`
 }
 
-const SLOTS = Array.from({ length: 15 }, (_, i) => {
-  const hour = 9 + i
+/** 12 hourly slots: noon–11 PM ET (hours 12–23); last slot ends at midnight. Bookings use `hour` in this range. */
+const SLOTS = Array.from({ length: 12 }, (_, i) => {
+  const hour = 12 + i
   return {
     hour,
     start: formatHour(hour),
@@ -20,8 +21,9 @@ const SLOTS = Array.from({ length: 15 }, (_, i) => {
 
 const HOST_OPEN = {
   id: 'host-open',
-  start: '8:50 AM',
-  end: '9:00 AM',
+  start: '11:30 AM',
+  end: '12:00 PM',
+  duration: '30 min',
   label: 'OPENS THE RAID TRAIN',
 }
 
@@ -29,10 +31,11 @@ const HOST_CLOSE = {
   id: 'host-close',
   start: '12:00 AM',
   end: '12:10 AM',
+  duration: '10 min',
   label: 'CLOSES THE RAID TRAIN',
 }
 
-const TOTAL_SLOTS = 15
+const TOTAL_SLOTS = 12
 const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD ?? ''
 
 function formatEventDate(isoDate) {
@@ -239,7 +242,7 @@ export default function App() {
   const eventDateLine = eventDateRaw
     ? formatEventDate(eventDateRaw)
     : null
-  const goLiveDate = useMemo(() => getEasternDateAtTime(eventDateRaw, 8, 50), [eventDateRaw])
+  const goLiveDate = useMemo(() => getEasternDateAtTime(eventDateRaw, 12, 0), [eventDateRaw])
   const countdown = useMemo(
     () => getCountdownParts(goLiveDate, nowTimestamp),
     [goLiveDate, nowTimestamp],
@@ -465,7 +468,7 @@ export default function App() {
         })}
         <div
           className="animate-slide-up"
-          style={{ animationDelay: `${16 * 30}ms` }}
+          style={{ animationDelay: `${(SLOTS.length + 1) * 30}ms` }}
         >
           <HostRow host={HOST_CLOSE} />
         </div>
@@ -493,7 +496,7 @@ export default function App() {
             </p>
 
             <p className="text-gold font-mono text-sm sm:text-base tracking-wider text-center mb-2">
-              {eventDateLine ? `${eventDateLine} · 8:50 AM ET` : 'SET EVENT DATE IN ADMIN'}
+              {eventDateLine ? `${eventDateLine} · Noon ET` : 'SET EVENT DATE IN ADMIN'}
             </p>
 
             {countdown?.done ? (
@@ -794,7 +797,7 @@ function HostRow({ host }) {
           {host.label}
         </span>
         <span className="font-mono text-[10px] text-gold-muted tracking-wide shrink-0">
-          10 min
+          {host.duration ?? '10 min'}
         </span>
       </div>
     </div>
