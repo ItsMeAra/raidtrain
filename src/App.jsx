@@ -273,7 +273,7 @@ export default function App() {
         <h1 className="font-display text-4xl sm:text-5xl md:text-6xl font-bold text-center uppercase tracking-tight mb-3 sm:mb-4 px-1 leading-tight">
           RAID SCHEDULE
         </h1>
-        <p className="text-gold font-mono text-sm sm:text-base tracking-wider text-center mb-2 px-1 text-balance">
+        <p className="text-gold font-mono text-base sm:text-lg tracking-wider text-center mb-2 px-1 text-balance">
           {eventDateLine ?? 'DATE TBD'}
         </p>
         <p className="text-muted font-mono text-[10px] sm:text-[11px] tracking-[0.2em] text-center uppercase mb-5 sm:mb-6 px-1">
