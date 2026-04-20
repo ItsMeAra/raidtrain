@@ -47,6 +47,20 @@ function formatEventDate(isoDate) {
   })
 }
 
+/** Whatnot handles are shown with @; ensure one leading @ and collapse accidental @@ */
+function normalizeWhatnotUsername(raw) {
+  const trimmed = raw.trim()
+  if (!trimmed) return ''
+  const handle = trimmed.replace(/^@+/, '')
+  if (!handle) return ''
+  return `@${handle}`
+}
+
+/** Same rules for values already in the DB (legacy entries saved without @). */
+function displayWhatnotUsername(stored) {
+  return normalizeWhatnotUsername(String(stored ?? ''))
+}
+
 function getTimeZoneOffsetMinutes(date, timeZone) {
   const dtf = new Intl.DateTimeFormat('en-US', {
     timeZone,
@@ -247,7 +261,7 @@ export default function App() {
   }
 
   async function submitClaim() {
-    const name = showNameInput.trim()
+    const name = normalizeWhatnotUsername(showNameInput)
     if (!name || modalHour == null) return
     setSavingSlot(true)
     const { error } = await supabase.from('raid_slots').insert({
@@ -417,7 +431,7 @@ export default function App() {
                   </div>
                   <div className="flex flex-col gap-2 min-w-0 sm:flex-row sm:items-center sm:flex-1 sm:gap-3">
                     <span className="font-display text-lg sm:text-xl font-semibold text-orange uppercase tracking-wide break-words sm:flex-1 sm:min-w-0 sm:truncate">
-                      {booked}
+                      {displayWhatnotUsername(booked)}
                     </span>
                     <span className="bg-orange text-white font-mono text-[10px] px-2.5 py-1 tracking-widest shrink-0 self-start hidden sm:inline-block">
                       BOOKED
@@ -559,8 +573,12 @@ export default function App() {
                   placeholder="@whatnotusername"
                   value={showNameInput}
                   onChange={(e) => setShowNameInput(e.target.value)}
+                  onBlur={() => {
+                    const n = normalizeWhatnotUsername(showNameInput)
+                    if (n) setShowNameInput(n)
+                  }}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && showNameInput.trim() && !savingSlot) {
+                    if (e.key === 'Enter' && normalizeWhatnotUsername(showNameInput) && !savingSlot) {
                       void submitClaim()
                     }
                   }}
@@ -576,7 +594,7 @@ export default function App() {
                   </button>
                   <button
                     type="button"
-                    disabled={!showNameInput.trim() || savingSlot}
+                    disabled={!normalizeWhatnotUsername(showNameInput) || savingSlot}
                     onClick={() => void submitClaim()}
                     className="w-full sm:flex-1 bg-orange text-white font-display font-semibold text-base sm:text-lg uppercase tracking-widest py-3.5 sm:py-4 min-h-11 cursor-pointer transition-colors disabled:bg-surface disabled:text-neutral-600 disabled:cursor-not-allowed disabled:opacity-40"
                   >
@@ -719,7 +737,7 @@ export default function App() {
                             {booked ? (
                               <div className="flex flex-col gap-2 min-w-0 sm:flex-row sm:items-center sm:flex-1 sm:justify-between sm:gap-2">
                                 <span className="font-display text-sm sm:text-base font-semibold text-orange uppercase tracking-wide break-words sm:min-w-0 sm:truncate">
-                                  {booked}
+                                  {displayWhatnotUsername(booked)}
                                 </span>
                                 <button
                                   type="button"
