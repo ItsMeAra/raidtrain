@@ -47,6 +47,76 @@ function formatEventDate(isoDate) {
   })
 }
 
+function getTimeZoneOffsetMinutes(date, timeZone) {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+  const parts = dtf.formatToParts(date)
+  const values = {}
+  for (const part of parts) {
+    if (part.type !== 'literal') values[part.type] = part.value
+  }
+  const asUtc = Date.UTC(
+    Number(values.year),
+    Number(values.month) - 1,
+    Number(values.day),
+    Number(values.hour),
+    Number(values.minute),
+    Number(values.second),
+  )
+  return (asUtc - date.getTime()) / 60000
+}
+
+function getEasternDateAtTime(isoDate, hour, minute) {
+  if (!isoDate) return null
+  const [yearRaw, monthRaw, dayRaw] = isoDate.split('-')
+  const year = Number(yearRaw)
+  const month = Number(monthRaw)
+  const day = Number(dayRaw)
+  if (
+    !Number.isInteger(year) ||
+    !Number.isInteger(month) ||
+    !Number.isInteger(day) ||
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > 31
+  ) {
+    return null
+  }
+  let utcTimestamp = Date.UTC(year, month - 1, day, hour, minute, 0)
+  for (let i = 0; i < 2; i += 1) {
+    const offsetMinutes = getTimeZoneOffsetMinutes(new Date(utcTimestamp), 'America/New_York')
+    utcTimestamp = Date.UTC(year, month - 1, day, hour, minute, 0) - offsetMinutes * 60000
+  }
+  const goLiveDate = new Date(utcTimestamp)
+  if (Number.isNaN(goLiveDate.getTime())) return null
+  return goLiveDate
+}
+
+function getCountdownParts(targetDate, nowTimestamp) {
+  if (!targetDate) return null
+  const diffMs = targetDate.getTime() - nowTimestamp
+  if (diffMs <= 0) {
+    return { done: true, days: 0, hours: 0, minutes: 0, seconds: 0 }
+  }
+
+  const totalSeconds = Math.floor(diffMs / 1000)
+  const days = Math.floor(totalSeconds / 86400)
+  const hours = Math.floor((totalSeconds % 86400) / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+
+  return { done: false, days, hours, minutes, seconds }
+}
+
 export default function App() {
   const [eventDateRaw, setEventDateRaw] = useState(null)
   const [bookings, setBookings] = useState({})
@@ -64,6 +134,7 @@ export default function App() {
   const [adminPasswordInput, setAdminPasswordInput] = useState('')
   const [adminDateInput, setAdminDateInput] = useState('')
   const [savingDate, setSavingDate] = useState(false)
+  const [nowTimestamp, setNowTimestamp] = useState(() => Date.now())
 
   const hasClient = Boolean(
     import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY,
@@ -136,6 +207,15 @@ export default function App() {
     }
   }, [hasClient, loadError, refreshData])
 
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setNowTimestamp(Date.now())
+    }, 1000)
+    return () => {
+      window.clearInterval(intervalId)
+    }
+  }, [])
+
   const bookedCount = useMemo(
     () => SLOTS.filter((s) => bookings[s.hour]).length,
     [bookings],
@@ -145,6 +225,11 @@ export default function App() {
   const eventDateLine = eventDateRaw
     ? formatEventDate(eventDateRaw)
     : null
+  const goLiveDate = useMemo(() => getEasternDateAtTime(eventDateRaw, 8, 50), [eventDateRaw])
+  const countdown = useMemo(
+    () => getCountdownParts(goLiveDate, nowTimestamp),
+    [goLiveDate, nowTimestamp],
+  )
 
   function openClaimModal(hour) {
     setModalHour(hour)
@@ -373,6 +458,65 @@ export default function App() {
           </main>
         </div>
       </div>
+
+      <footer className="mx-auto w-full max-w-[720px] px-3 pb-3 sm:px-5 sm:pb-5">
+        <div className="raid-card relative z-10 overflow-hidden">
+          <div className="border-t border-border-subtle px-3 py-6 sm:px-6 sm:py-7">
+            <p className="font-mono text-xs tracking-[0.25em] text-muted flex items-center justify-center gap-2 mb-3 text-center">
+              <span
+                className={`inline-block w-2 h-2 rounded-full ${
+                  countdown?.done ? 'bg-green-500' : 'bg-orange animate-pulse'
+                }`}
+                aria-hidden
+              />
+              GO LIVE COUNTDOWN
+              <span
+                className={`inline-block w-2 h-2 rounded-full ${
+                  countdown?.done ? 'bg-green-500' : 'bg-orange animate-pulse'
+                }`}
+                aria-hidden
+              />
+            </p>
+
+            <p className="text-gold font-mono text-sm sm:text-base tracking-wider text-center mb-2">
+              {eventDateLine ? `${eventDateLine} · 8:50 AM ET` : 'SET EVENT DATE IN ADMIN'}
+            </p>
+
+            {countdown?.done ? (
+              <p className="font-display text-2xl sm:text-3xl text-center uppercase tracking-wide text-green-400">
+                Live now
+              </p>
+            ) : (
+              <div className="grid grid-cols-4 font-mono text-[11px] sm:text-xs tracking-widest">
+                <div className="text-center py-3 sm:py-2 border-r border-border-subtle">
+                  <span className="text-muted-2 block mb-1">DAYS</span>
+                  <span className="text-white text-base tabular-nums">
+                    {String(countdown?.days ?? 0).padStart(2, '0')}
+                  </span>
+                </div>
+                <div className="text-center py-3 sm:py-2 border-r border-border-subtle">
+                  <span className="text-muted-2 block mb-1">HRS</span>
+                  <span className="text-white text-base tabular-nums">
+                    {String(countdown?.hours ?? 0).padStart(2, '0')}
+                  </span>
+                </div>
+                <div className="text-center py-3 sm:py-2 border-r border-border-subtle">
+                  <span className="text-muted-2 block mb-1">MIN</span>
+                  <span className="text-white text-base tabular-nums">
+                    {String(countdown?.minutes ?? 0).padStart(2, '0')}
+                  </span>
+                </div>
+                <div className="text-center py-3 sm:py-2">
+                  <span className="text-muted-2 block mb-1">SEC</span>
+                  <span className="text-orange text-base tabular-nums">
+                    {String(countdown?.seconds ?? 0).padStart(2, '0')}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </footer>
 
       <button
         type="button"
