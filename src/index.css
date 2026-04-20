@@ -46,28 +46,114 @@
   50%       { box-shadow: 0 0 12px 4px rgba(255, 69, 0, 0.15); }
 }
 
+@keyframes backdropDrift {
+  0%   { transform: translate3d(0, 0, 0) scale(1); }
+  50%  { transform: translate3d(0, -1.25%, 0) scale(1.03); }
+  100% { transform: translate3d(0, 0, 0) scale(1); }
+}
+
+@keyframes orbFloat {
+  0%   { transform: translate3d(-1.6%, -1.4%, 0) scale(1); }
+  30%  { transform: translate3d(1.4%, -0.8%, 0) scale(1.03); }
+  65%  { transform: translate3d(1.9%, 1.5%, 0) scale(1.055); }
+  100% { transform: translate3d(-1.6%, -1.4%, 0) scale(1); }
+}
+
+@keyframes orbPulse {
+  0%   { opacity: 0.54; filter: blur(42px) saturate(110%); }
+  50%  { opacity: 0.68; filter: blur(46px) saturate(118%); }
+  100% { opacity: 0.54; filter: blur(42px) saturate(110%); }
+}
+
+@keyframes orbFloatAlt {
+  0%   { transform: translate3d(1.2%, 0.6%, 0) scale(1.01); }
+  35%  { transform: translate3d(-1.5%, 1.2%, 0) scale(1.035); }
+  70%  { transform: translate3d(-0.8%, -1.1%, 0) scale(1.02); }
+  100% { transform: translate3d(1.2%, 0.6%, 0) scale(1.01); }
+}
+
+@keyframes orbPulseAlt {
+  0%   { opacity: 0.34; filter: blur(50px) saturate(104%); }
+  50%  { opacity: 0.47; filter: blur(56px) saturate(112%); }
+  100% { opacity: 0.34; filter: blur(50px) saturate(104%); }
+}
+
+@keyframes gridDrift {
+  from { background-position: 0 0, 0 0; }
+  to   { background-position: 0 32px, 32px 0; }
+}
+
 /* Full-page backdrop: soft glow + technical grid (broadcast board) */
 .app-backdrop {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
   min-height: 100dvh;
   background-color: #0a0a0a;
   background-image:
-    radial-gradient(ellipse 100% 55% at 50% -15%, rgba(255, 69, 0, 0.07), transparent 52%),
-    radial-gradient(ellipse 50% 40% at 100% 100%, rgba(255, 193, 7, 0.035), transparent 50%),
+    radial-gradient(ellipse 120% 62% at 50% -22%, rgba(255, 69, 0, 0.1), transparent 56%),
+    radial-gradient(ellipse 74% 58% at 100% 104%, rgba(255, 193, 7, 0.055), transparent 58%),
+    linear-gradient(180deg, rgba(255, 69, 0, 0.025) 0%, rgba(10, 10, 10, 0) 34%, rgba(255, 193, 7, 0.02) 100%),
     repeating-linear-gradient(
       0deg,
       transparent,
       transparent 31px,
-      rgba(255, 255, 255, 0.02) 31px,
-      rgba(255, 255, 255, 0.02) 32px
+      rgba(255, 255, 255, 0.018) 31px,
+      rgba(255, 255, 255, 0.018) 32px
     ),
     repeating-linear-gradient(
       90deg,
       transparent,
       transparent 31px,
-      rgba(255, 255, 255, 0.02) 31px,
-      rgba(255, 255, 255, 0.02) 32px
+      rgba(255, 255, 255, 0.018) 31px,
+      rgba(255, 255, 255, 0.018) 32px
     );
   background-attachment: fixed;
+  animation: gridDrift 32s linear infinite;
+}
+
+.app-backdrop::before {
+  content: "";
+  position: absolute;
+  inset: -8%;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 72% 54% at 17% 78%, rgba(255, 69, 0, 0.14), transparent 62%),
+    radial-gradient(ellipse 66% 50% at 82% 28%, rgba(255, 193, 7, 0.11), transparent 62%);
+  filter: blur(42px) saturate(110%);
+  opacity: 0.54;
+  will-change: transform, opacity, filter;
+  animation: orbFloat 28s ease-in-out infinite, orbPulse 11s ease-in-out infinite;
+}
+
+.app-backdrop::after {
+  content: "";
+  position: absolute;
+  inset: -12%;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 100% 68% at 50% -8%, rgba(255, 69, 0, 0.1), transparent 62%),
+    radial-gradient(ellipse 72% 58% at 62% 112%, rgba(255, 193, 7, 0.08), transparent 65%);
+  mix-blend-mode: screen;
+  opacity: 0.34;
+  will-change: transform, opacity, filter;
+  animation: backdropDrift 22s ease-in-out infinite, orbFloatAlt 30s ease-in-out infinite, orbPulseAlt 14s ease-in-out infinite;
+}
+
+.app-backdrop > div,
+.app-backdrop > footer {
+  position: relative;
+  z-index: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-backdrop,
+  .app-backdrop::before,
+  .app-backdrop::after {
+    animation: none;
+  }
 }
 
 /* Main content card */
