@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from './supabase.js'
+import FlickeringGrid from './FlickeringGrid.jsx'
 
 function formatHour(hour24) {
   const h = ((hour24 % 24) + 24) % 24
@@ -358,6 +359,7 @@ export default function App() {
 
   return (
     <div className="app-backdrop text-white pb-[max(7.5rem,env(safe-area-inset-bottom,0px))]">
+      <FlickeringGrid className="z-0 opacity-70" />
       <div className="mx-auto w-full max-w-[720px] px-3 pt-6 sm:px-5 sm:pt-8 sm:pb-2">
         <div className="raid-card relative z-10 overflow-hidden">
           <header className="border-b border-border-subtle px-3 pt-8 sm:px-6 sm:pt-10 pb-6 sm:pb-8">
